@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>沙棘接接樂 - 成長挑戰</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #87CEEB;
+            touch-action: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* UI 層 */
+        #uiLayer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud {
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .score-box {
+            background: rgba(255, 165, 0, 0.8);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid #fff;
+        }
+
+        .timer-box {
+            background: rgba(50, 205, 50, 0.8);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid #fff;
+        }
+
+        /* 選單與結束畫面 */
+        #menuScreen, #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            color: white;
+            z-index: 10;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: #FFD700;
+            text-shadow: 3px 3px 0 #FF8C00;
+        }
+
+        p {
+            font-size: 20px;
+            margin-bottom: 30px;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        button {
+            background: linear-gradient(to bottom, #FF8C00, #FF4500);
+            border: 2px solid white;
+            color: white;
+            padding: 15px 40px;
+            font-size: 24px;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #8B0000;
+            transition: transform 0.1s;
+        }
+
+        button:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #8B0000;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #finalScore {
+            font-size: 72px;
+            color: #FFD700;
+            margin: 20px 0;
+        }
+
+        .hint {
+            font-size: 14px;
+            color: #ccc;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="uiLayer">
+        <div class="hud">
+            <div class="score-box">得分: <span id="scoreDisplay">0</span></div>
+            <div class="timer-box">時間: <span id="timeDisplay">30</span></div>
+        </div>
+    </div>
+
+    <!-- 開始選單 -->
+    <div id="menuScreen">
+        <h1>沙棘接接樂</h1>
+        <p>接住落下的沙棘果實，讓自己變飽滿！<br>目標：在 30 秒內達到 30 分！</p>
+        <button id="startBtn">開始挑戰</button>
+        <div class="hint">電腦：使用滑鼠左右移動<br>手機：左右滑動螢幕</div>
+    </div>
+
+    <!-- 遊戲結束畫面 -->
+    <div id="gameOverScreen" class="hidden">
+        <h1>時間到！</h1>
+        <p>你的飽和度成果：</p>
+        <div id="finalScore">0</div>
+        <button id="restartBtn">再玩一次</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const menuScreen = document.getElementById('menuScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        // 遊戲參數
+        const GAME_DURATION = 30; // 30秒
+        const GRAVITY = 0.05;    // 慢速下落
+        const MAX_GROWTH_SCORE = 30; // 30分達到最完整狀態
+
+        let gameState = 'MENU';
+        let score = 0;
+        let timeLeft = GAME_DURATION;
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let berries = [];
+
+        const player = {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 80
+        };
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = canvas.height - 120;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 控制邏輯
+        function moveHandler(clientX) {
+            if (gameState !== 'PLAYING') return;
+            player.x = clientX - player.width / 2;
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+        }
+
+        window.addEventListener('mousemove', (e) => moveHandler(e.clientX));
+        window.addEventListener('touchmove', (e) => {
+            moveHandler(e.touches[0].clientX);
+            e.preventDefault();
+        }, { passive: false });
+
+        startBtn.onclick = startGame;
+        restartBtn.onclick = startGame;
+
+        function startGame() {
+            gameState = 'PLAYING';
+            score = 0;
+            timeLeft = GAME_DURATION;
+            berries = [];
+            scoreDisplay.textContent = '0';
+            menuScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            player.x = canvas.width / 2 - player.width / 2;
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function createBerry() {
+            const radius = 10 + Math.random() * 5;
+            berries.push({
+                x: Math.random() * (canvas.width - 40) + 20,
+                y: -20,
+                radius: radius,
+                speedY: 0.5 + Math.random() * 1.0,
+                color: '#FF8C00'
+            });
+        }
+
+        function update(dt) {
+            timeLeft -= dt / 1000;
+            if (timeLeft <= 0) {
+                timeLeft = 0;
+                gameState = 'GAMEOVER';
+                finalScoreDisplay.textContent = score;
+                gameOverScreen.classList.remove('hidden');
+            }
+            timeDisplay.textContent = Math.ceil(timeLeft);
+
+            spawnTimer += dt;
+            if (spawnTimer > 800) {
+                createBerry();
+                spawnTimer = 0;
+            }
+
+            for (let i = berries.length - 1; i >= 0; i--) {
+                const b = berries[i];
+                b.y += b.speedY;
+                b.speedY += GRAVITY;
+
+                // 碰撞判定
+                if (b.x > player.x && b.x < player.x + player.width &&
+                    b.y + b.radius > player.y && b.y < player.y + player.height) {
+                    score++;
+                    scoreDisplay.textContent = score;
+                    berries.splice(i, 1);
+                } else if (b.y > canvas.height + 50) {
+                    berries.splice(i, 1);
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 畫背景裝飾樹葉
+            ctx.fillStyle = '#228B22';
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, 80);
+            for (let i = 0; i < canvas.width; i += 60) {
+                ctx.quadraticCurveTo(i + 30, 140, i + 60, 80);
+            }
+            ctx.lineTo(canvas.width, 0);
+            ctx.fill();
+
+            // 畫主角 (沙棘果)
+            ctx.save();
+            const saturation = Math.min(score, MAX_GROWTH_SCORE) / MAX_GROWTH_SCORE;
+            const currentRadius = 30 + 15 * saturation; // 從 30 變大到 45
+            const centerX = player.x + player.width / 2;
+            const centerY = player.y + player.height / 2;
+            
+            ctx.translate(centerX, centerY);
+            ctx.fillStyle = '#FF8C00';
+            
+            // 繪製果實形狀 (乾扁程度隨分數降低)
+            ctx.beginPath();
+            const wrinkle = 6 * (1 - saturation); // 0分時皺褶為 6，30分時為 0
+            for (let a = 0; a < Math.PI * 2; a += 0.1) {
+                const r = currentRadius - (Math.abs(Math.sin(a * 8)) * wrinkle);
+                const px = Math.cos(a) * r;
+                const py = Math.sin(a) * r;
+                if (a === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // 飽和時的光澤
+            if (saturation > 0.3) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.1 + saturation * 0.5})`;
+                ctx.beginPath();
+                ctx.ellipse(-currentRadius*0.3, -currentRadius*0.3, currentRadius*0.25, currentRadius*0.15, Math.PI/4, 0, Math.PI*2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // 畫落下的沙棘果
+            for (const b of berries) {
+                ctx.fillStyle = b.color;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                ctx.fill();
+                // 小亮點
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.beginPath();
+                ctx.arc(b.x - b.radius*0.3, b.y - b.radius*0.3, b.radius*0.3, 0, 7);
+                ctx.fill();
+            }
+        }
+
+        function gameLoop(timestamp) {
+            if (gameState !== 'PLAYING') return;
+            const dt = timestamp - lastTime;
+            lastTime = timestamp;
+            update(dt);
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+    </script>
+</body>
+</html>
